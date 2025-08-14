@@ -35,25 +35,24 @@ end)
 --- Function to display electrician job statistics menu
 --- Shows player's electrician work history and performance metrics
 local ShowElectricianStats = function()
-    lib.callback('sd-civilianjobs:server:getJobTypeStats', false, function(electricianStatsData)
-        if electricianStatsData then
-            local electricianGeneralStats = electricianStatsData.general or {}
+    lib.callback('sd-civilianjobs:server:getElectricianStats', false, function(electricianStats)
+        if electricianStats then
             local electricianStatsOptions = {
                 {
                     title = 'Cash Earned',
-                    description = '$' .. (electricianGeneralStats.cash_earned or 0) .. ' total earned',
+                    description = '$' .. (electricianStats.cash_earned or 0) .. ' total earned',
                     icon = 'fas fa-dollar-sign',
                     readOnly = true
                 },
                 {
                     title = 'Light Poles Repaired',
-                    description = (electricianGeneralStats.light_poles_fixed or 0) .. ' light poles repaired',
+                    description = (electricianStats.light_poles_fixed or 0) .. ' light poles repaired',
                     icon = 'fas fa-lightbulb',
                     readOnly = true
                 },
                 {
                     title = 'Electrical Boxes Repaired',
-                    description = (electricianGeneralStats.electrical_boxes_fixed or 0) .. ' electrical boxes repaired',
+                    description = (electricianStats.electrical_boxes_fixed or 0) .. ' electrical boxes repaired',
                     icon = 'fas fa-plug',
                     readOnly = true
                 },
@@ -77,7 +76,7 @@ local ShowElectricianStats = function()
         else
             ShowNotification('Failed to load electrician statistics', 'error')
         end
-    end, 'electrician')
+    end)
 end
 
 --- Function to create electrician job blip for repair locations

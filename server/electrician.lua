@@ -92,180 +92,6 @@ lib.callback.register('sd-civilianjobs:server:getPlayerInfo', function(source, j
     end
 end)
 
--- Callback to retrieve all stats for the calling player
-lib.callback.register('sd-civilianjobs:server:getAllStats', function(source)
-    local identifier = GetIdentifier(source)
-    if not identifier then return {} end
-    
-    for _, record in ipairs(levelData) do
-        if record.Identifier == identifier then
-            local playerStats = json.decode(record.Stats) or {}
-            return playerStats
-        end
-    end
-    
-    return {} -- Return empty table if no stats found
-end)
-
--- Callback to retrieve a specific stat from a specific job type for the calling player
--- @param jobType string The job type to get stats from
--- @param statName string The specific stat to retrieve (optional, returns all stats for job type if nil)
-lib.callback.register('sd-civilianjobs:server:getSpecificStat', function(source, jobType, statName)
-    local identifier = GetIdentifier(source)
-    if not identifier then return nil end
-    
-    for _, record in ipairs(levelData) do
-        if record.Identifier == identifier then
-            local playerStats = json.decode(record.Stats) or {}
-            
-            if not playerStats[jobType] then
-                return statName and 0 or {}
-            end
-            
-            if statName then
-                return playerStats[jobType][statName] or 0
-            else
-                return playerStats[jobType] or {}
-            end
-        end
-    end
-    
-    return statName and 0 or {}
-end)
-
--- Callback to retrieve all stats for a specific job type with formatted structure
-lib.callback.register('sd-civilianjobs:server:getJobTypeStats', function(source, jobType)
-    local identifier = GetIdentifier(source)
-    if not identifier then return {} end
-    
-    for _, record in ipairs(levelData) do
-        if record.Identifier == identifier then
-            local playerStats = json.decode(record.Stats) or {}
-            
-            if not playerStats[jobType] then
-                return {}
-            end
-            
-            local jobStats = playerStats[jobType]
-            local formattedStats = {
-                general = {},
-                items = {}
-            }
-            
-            local generalStats = {
-                "total_attempts",
-                "successes", 
-                "failures",
-                "cash_earned",
-                "total_cash_received",
-                "light_poles_fixed",
-                "electrical_boxes_fixed"
-            }
-            
-            for statName, value in pairs(jobStats) do
-                local isGeneralStat = false
-                for _, generalStat in ipairs(generalStats) do
-                    if statName == generalStat then
-                        formattedStats.general[statName] = value
-                        isGeneralStat = true
-                        break
-                    end
-                end
-                
-                if not isGeneralStat then
-                    formattedStats.items[statName] = value
-                end
-            end
-            
-            return formattedStats
-        end
-    end
-    
-    return {} -- Return empty table if player not found
-end)
-
--- Callback to retrieve level and progress information for all job types
-lib.callback.register('sd-civilianjobs:server:getAllLevelProgress', function(source)
-    local identifier = GetIdentifier(source)
-    if not identifier then return {} end
-    
-    local progressData = {}
-    
-    local jobTypes = {"electrician", "mechanic", "delivery", "construction", "cleaning", "security"}
-    
-    for _, jobType in ipairs(jobTypes) do
-        local playerLevelData = {}
-        local playerStats = {}
-        
-        for _, record in ipairs(levelData) do
-            if record.Identifier == identifier then
-                playerLevelData = json.decode(record.levelData) or {}
-                playerStats = json.decode(record.Stats) or {}
-                break
-            end
-        end
-        
-        local currentXP = playerLevelData[jobType] or 0
-        local currentLevel = CalculateLevel(currentXP, jobType)
-        
-        local nextLevel = currentLevel + 1
-        local currentLevelXP = 0
-        local nextLevelXP = nil
-        
-        if config.Levels[jobType] then
-            if config.Levels[jobType][currentLevel] then
-                currentLevelXP = config.Levels[jobType][currentLevel].xpRequired or 0
-            end
-            
-            if config.Levels[jobType][nextLevel] then
-                nextLevelXP = config.Levels[jobType][nextLevel].xpRequired
-            end
-        end
-        
-        local progressPercent = 0
-        if nextLevelXP then
-            local xpIntoCurrentLevel = currentXP - currentLevelXP
-            local xpNeededForNextLevel = nextLevelXP - currentLevelXP
-            if xpNeededForNextLevel > 0 then
-                progressPercent = math.floor((xpIntoCurrentLevel / xpNeededForNextLevel) * 100)
-                progressPercent = math.max(0, math.min(100, progressPercent))
-            end
-        else
-            progressPercent = 100
-        end
-        
-        local jobStats = playerStats[jobType] or {}
-        local totalAttempts = jobStats.total_attempts or 0
-        local successes = jobStats.successes or 0
-        local failures = jobStats.failures or 0
-        local cashEarned = jobStats.cash_earned or 0
-        local cashReceived = jobStats.total_cash_received or 0
-        
-        local successRate = 0
-        if totalAttempts > 0 then
-            successRate = math.floor((successes / totalAttempts) * 100)
-        end
-        
-        progressData[jobType] = {
-            currentLevel = currentLevel,
-            currentXP = currentXP,
-            nextLevelXP = nextLevelXP,
-            progressPercent = progressPercent,
-            maxLevel = nextLevelXP == nil,
-            stats = {
-                totalAttempts = totalAttempts,
-                successes = successes,
-                failures = failures,
-                successRate = successRate,
-                cashEarned = cashEarned,
-                cashReceived = cashReceived
-            }
-        }
-    end
-    
-    return progressData
-end)
-
 --- Callback to start an electrician job session
 --- @param source number Player source ID
 --- @return boolean success Whether the job was started successfully
@@ -380,4 +206,21 @@ lib.callback.register('sd-civilianjobs:server:hasActiveElectricianJob', function
     if not identifier then return false end
     
     return activeElectricianJobs[identifier] ~= nil
+end)
+
+--- Callback to retrieve electrician job statistics
+--- @param source number Player source ID
+--- @return table electricianStats Raw electrician statistics from database
+lib.callback.register('sd-civilianjobs:server:getElectricianStats', function(source)
+    local identifier = GetIdentifier(source)
+    if not identifier then return {} end
+    
+    for _, record in ipairs(levelData) do
+        if record.Identifier == identifier then
+            local playerStats = json.decode(record.Stats) or {}
+            return playerStats.electrician or {}
+        end
+    end
+    
+    return {} -- Return empty table if player not found
 end)

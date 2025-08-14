@@ -7,8 +7,8 @@ return {
     BaseXP = 20, -- Base XP awarded for every successful repair
     Logging = true, -- Enables lib.logger usage for this action. Will log a players source, character name and identifier as well as the action they took and the items and cash they received from it.
     Distance = { -- Distance from player to job location
-        min = 400, -- Minimum distance from player for job locations (in units)
-        max = 800  -- Maximum distance from player for job locations (in units)
+        min = 200, -- Minimum distance from player for job locations (in units)
+        max = 1200  -- Maximum distance from player for job locations (in units)
     },
     Ped = {
         model = "s_m_y_construct_01", -- Ped model for electrician job
@@ -33,7 +33,7 @@ return {
             return lib.skillCheck({ 'easy', 'easy', 'medium' }, { 'w', 'a', 's', 'd' })
         end,
     },
-    Rewards = { -- Level-based cash rewards from parking meters
+    Rewards = { -- Level-based cash rewards per lightpole/electricalbox
         [1] = { -- Level 1 rewards (basic)
             min = 3,
             max = 12

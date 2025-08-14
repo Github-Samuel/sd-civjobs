@@ -34,25 +34,24 @@ end)
 --- Function to display paperboy job statistics menu
 --- Shows player's paperboy work history and performance metrics
 local ShowPaperboyStats = function()
-    lib.callback('sd-civilianjobs:server:getJobTypeStats', false, function(paperboyStatsData)
-        if paperboyStatsData then
-            local paperboyGeneralStats = paperboyStatsData.general or {}
+    lib.callback('sd-civilianjobs:server:getPaperboyStats', false, function(paperboyStats)
+        if paperboyStats then
             local paperboyStatsOptions = {
                 {
                     title = 'Cash Earned',
-                    description = '$' .. (paperboyGeneralStats.cash_earned or 0) .. ' total earned',
+                    description = '$' .. (paperboyStats.cash_earned or 0) .. ' total earned',
                     icon = 'fas fa-dollar-sign',
                     readOnly = true
                 },
                 {
                     title = 'Newspapers Delivered',
-                    description = (paperboyGeneralStats.newspapers_delivered or 0) .. ' newspapers delivered',
+                    description = (paperboyStats.newspapers_delivered or 0) .. ' newspapers delivered',
                     icon = 'fas fa-newspaper',
                     readOnly = true
                 },
                 {
                     title = 'Routes Completed',
-                    description = (paperboyGeneralStats.routes_completed or 0) .. ' delivery routes completed',
+                    description = (paperboyStats.routes_completed or 0) .. ' delivery routes completed',
                     icon = 'fas fa-route',
                     readOnly = true
                 },
@@ -76,187 +75,126 @@ local ShowPaperboyStats = function()
         else
             ShowNotification('Failed to load paperboy statistics', 'error')
         end
-    end, 'paperboy')
+    end)
 end
 
--- Function to create paperboy job blip for delivery locations
---- @param paperboyJobCoords vector3 Coordinates for the delivery location
-local CreatePaperboyJobBlip = function(paperboyJobCoords)
-    if currentPaperboyJobBlip then
-        RemoveBlip(currentPaperboyJobBlip)
-    end
-    
-    currentPaperboyJobBlip = AddBlipForCoord(paperboyJobCoords.x, paperboyJobCoords.y, paperboyJobCoords.z)
-    SetBlipSprite(currentPaperboyJobBlip, 40) -- Delivery icon
-    SetBlipColour(currentPaperboyJobBlip, 61) -- Light blue
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString("Newspaper Delivery")
-    EndTextCommandSetBlipName(currentPaperboyJobBlip)
-    
-    SetBlipDisplay(currentPaperboyJobBlip, 4)
-    SetBlipScale(currentPaperboyJobBlip, 0.8)
-    SetBlipAsShortRange(currentPaperboyJobBlip, false)
-    SetBlipRoute(currentPaperboyJobBlip, true)
-    SetBlipRouteColour(currentPaperboyJobBlip, 3)
-end
 
---- Function to check if location was recently used
---- @param location vector3 Location to check
---- @return boolean wasRecentlyUsed Whether the location was recently used
-local IsLocationRecentlyUsed = function(location)
-    for _, recentLocation in ipairs(recentPaperboyLocations) do
-        if #(location - recentLocation) < 5.0 then -- Within 5 units is considered same location
-            return true
-        end
-    end
-    return false
-end
 
---- Function to add location to recent locations list
---- @param location vector3 Location to add to recent list
-local AddToRecentLocations = function(location)
-    table.insert(recentPaperboyLocations, location)
-    
-    -- Keep only the last 4-5 locations
-    if #recentPaperboyLocations > 5 then
-        table.remove(recentPaperboyLocations, 1) -- Remove oldest location
-    end
-end
+-- Paperboy job state variables
+local paperboyWorkZones = {}
+local paperboyBlipStore = {}
+local paperboyDelay = false
+local paperboyNetId = nil
 
---- Function to get random paperboy delivery location within distance constraints
---- @return vector3 randomPaperboyLocation Random coordinates for delivery work within distance range
-local GetRandomPaperboyLocation = function()
-    local playerPed = PlayerPedId()
-    local playerCoords = GetEntityCoords(playerPed)
-    local paperboyDeliveryLocations = paperboyConfig.JobLocations.deliveryPoints
-    
-    -- Filter locations by distance and exclude recent locations
-    local validPaperboyLocations = {}
-    for _, location in ipairs(paperboyDeliveryLocations) do
-        local distance = #(playerCoords - location)
-        if distance >= paperboyConfig.Distance.min and distance <= paperboyConfig.Distance.max then
-            if not IsLocationRecentlyUsed(location) then
-                table.insert(validPaperboyLocations, location)
+--- Function to reset paperboy job zones and blips
+local ResetPaperboyJob = function()
+    if next(paperboyWorkZones) then
+        for i = 1, #paperboyWorkZones do
+            if paperboyWorkZones[i] then
+                paperboyWorkZones[i]:remove()
             end
         end
     end
-    
-    -- If no valid locations found within distance range (excluding recent), try with recent locations included
-    if #validPaperboyLocations == 0 then
-        for _, location in ipairs(paperboyDeliveryLocations) do
-            local distance = #(playerCoords - location)
-            if distance >= paperboyConfig.Distance.min and distance <= paperboyConfig.Distance.max then
-                table.insert(validPaperboyLocations, location)
+    if next(paperboyBlipStore) then
+        for k, _ in pairs(paperboyBlipStore) do
+            if DoesBlipExist(paperboyBlipStore[k]) then
+                RemoveBlip(paperboyBlipStore[k])
+                paperboyBlipStore[k] = nil
             end
         end
-        print("^3[Civilian Jobs] No new paperboy locations found within distance range, including recent locations^0")
     end
-    
-    -- If still no valid locations, use random location from all available
-    if #validPaperboyLocations == 0 then
-        validPaperboyLocations = paperboyDeliveryLocations
-        print("^3[Civilian Jobs] No paperboy locations found within distance range, using random location^0")
-    end
-    
-    local randomPaperboyLocation = validPaperboyLocations[math.random(#validPaperboyLocations)]
-    
-    -- Add this location to recent locations list
-    AddToRecentLocations(randomPaperboyLocation)
-    
-    return randomPaperboyLocation
+    table.wipe(paperboyWorkZones)
+    table.wipe(paperboyBlipStore)
 end
 
---- Function to create paperboy job target for delivery interactions
---- @param paperboyJobCoords vector3 Coordinates for the delivery target
-local CreatePaperboyJobTarget = function(paperboyJobCoords)
-    if currentPaperboyJobTarget then
-        exports.ox_target:removeZone(currentPaperboyJobTarget)
-    end
-    
-    local paperboyTargetOptions = {
-        {
-            name = 'deliver_newspaper',
-            icon = 'fas fa-newspaper',
-            label = 'Deliver Newspaper',
-            onSelect = function()
-                DeliverNewspaper()
-            end
-        }
-    }
-    
-    currentPaperboyJobTarget = exports.ox_target:addSphereZone({
-        coords = paperboyJobCoords,
-        radius = 2.0,
-        options = paperboyTargetOptions
-    })
-end
-
---- Function to handle newspaper delivery work
-local DeliverNewspaper = function()
-    local playerPed = PlayerPedId()
-    local playerCoords = GetEntityCoords(playerPed)
-    local deliveryTargetCoords = currentPaperboyJobLocation
-    
-    local minigameSuccess = true
-    if paperboyConfig.Minigame.Enable then
-        minigameSuccess = paperboyConfig.Minigame.Start()
-        if not minigameSuccess then
-            ShowNotification('Delivery failed! Try again.', 'error')
-            return
-        end
-    end
-    
-    -- Use cached player level to determine progress bar time (no callback needed)
-    local deliveryTime = paperboyConfig.Time[cachedPlayerLevel] or paperboyConfig.Time[1] -- Fallback to level 1 time
-    
-    TaskStartScenarioInPlace(playerPed, "WORLD_HUMAN_CLIPBOARD", 0, true)
-    
-    if lib.progressBar({
-        duration = deliveryTime * 1000,
-        label = 'Delivering newspaper...',
-        useWhileDead = false,
-        canCancel = true,
-        disable = {
-            car = true,
-            move = true,
-            combat = true
-        }
-    }) then
-        ClearPedTasks(playerPed)
-        
-        lib.callback('sd-civilianjobs:server:completePaperboyTask', false, function(paperboyTaskCompleted, paperboyCashReward)
-            if paperboyTaskCompleted then
-                ShowNotification('Newspaper delivered! $' .. paperboyCashReward .. ' added to your paycheck, next location will be marked.', 'success')
-                
-                if currentPaperboyJobBlip then
-                    RemoveBlip(currentPaperboyJobBlip)
-                    currentPaperboyJobBlip = nil
+--- Function to validate newspaper drop at delivery point
+--- @param point table The delivery point that was hit
+local ValidatePaperboyDrop = function(point)
+    lib.callback('sd-civilianjobs:server:validatePaperboyDrop', false, function(success, remainingDeliveries)
+        if success then
+            point:remove()
+            if next(paperboyBlipStore) then
+                if DoesBlipExist(paperboyBlipStore[point.blip]) then
+                    RemoveBlip(paperboyBlipStore[point.blip])
+                    paperboyBlipStore[point.blip] = nil
                 end
-                if currentPaperboyJobTarget then
-                    exports.ox_target:removeZone(currentPaperboyJobTarget)
-                    currentPaperboyJobTarget = nil
-                end
-                
-                Wait(2000)
-                local nextPaperboyLocation = GetRandomPaperboyLocation()
-                currentPaperboyJobLocation = nextPaperboyLocation
-                
-                CreatePaperboyJobBlip(nextPaperboyLocation)
-                CreatePaperboyJobTarget(nextPaperboyLocation)
+            end
+            
+            if remainingDeliveries > 0 then
+                ShowNotification(('Newspaper delivered! %s deliveries remaining'):format(remainingDeliveries), 'success')
             else
-                ShowNotification('Failed to complete newspaper delivery', 'error')
+                ShowNotification('All newspapers delivered! Return to the paperboy to finish your shift.', 'success')
+                ResetPaperboyJob()
             end
-        end)
-    else
-        ClearPedTasks(playerPed)
-        ShowNotification('Newspaper delivery cancelled', 'error')
+        else
+            ShowNotification('Failed to deliver newspaper', 'error')
+        end
+        Wait(1000)
+        paperboyDelay = false
+    end, point.coords, paperboyNetId)
+end
+
+--- Function to create paperboy delivery route with throwing mechanics
+--- @param deliveryData table Data containing delivery locations and netid
+local CreatePaperboyRoute = function(deliveryData)
+    if not deliveryData or not deliveryData.locations then return end
+    
+    paperboyNetId = deliveryData.netid
+    
+    for k, v in pairs(deliveryData.locations) do
+        local zone = lib.points.new({
+            coords = vec3(v.x, v.y, v.z),
+            distance = 30,
+            blip = k,
+            nearby = function(point)
+                -- Draw marker at delivery location
+                DrawMarker(1, point.coords.x, point.coords.y, point.coords.z - 1.5, 0, 0, 0, 0, 0, 0, 4.0, 4.0, 2.0, 227, 14, 88, 165, 0, 0, 0, 0)
+                
+                -- Check if newspaper projectile is within range
+                if point.isClosest and IsProjectileTypeWithinDistance(point.coords.x, point.coords.y, point.coords.z, `WEAPON_ACIDPACKAGE`, 3.0, true) and not paperboyDelay then
+                    paperboyDelay = true
+                    ValidatePaperboyDrop(point)
+                end
+            end,
+        })
+        paperboyWorkZones[#paperboyWorkZones + 1] = zone
+        
+        -- Create blip for delivery location
+        paperboyBlipStore[k] = AddBlipForCoord(v.x, v.y, v.z)
+        SetBlipSprite(paperboyBlipStore[k], 40)
+        SetBlipDisplay(paperboyBlipStore[k], 4)
+        SetBlipScale(paperboyBlipStore[k], 0.65)
+        SetBlipAsShortRange(paperboyBlipStore[k], true)
+        SetBlipColour(paperboyBlipStore[k], 61)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentSubstringPlayerName('Delivery')
+        EndTextCommandSetBlipName(paperboyBlipStore[k])
     end
+    
+    -- ShowNotification('Route assigned: ' .. (deliveryData.routeName or 'Unknown Route') .. '. Throw newspapers at the marked locations!', 'success')
+end
+
+-- Event handler to monitor newspaper inventory
+if GetResourceState('es_extended') == 'started' then
+    RegisterNetEvent('esx:removeInventoryItem', function(item, count)
+        if item == 'WEAPON_ACIDPACKAGE' and isPaperboyJobActive and count == 0 then
+            ShowNotification('You are all out of newspapers. Return to the paperboy to finish your shift.', 'info')
+            ResetPaperboyJob()
+        end
+    end)
+else
+    AddEventHandler('ox_inventory:itemCount', function(item, count)
+        if item == 'WEAPON_ACIDPACKAGE' and isPaperboyJobActive and count == 0 then
+            ShowNotification('You are all out of newspapers. Return to the paperboy to finish your shift.', 'info')
+            ResetPaperboyJob()
+        end
+    end)
 end
 
 --- Function to start paperboy job session
---- Initializes paperboy work and creates first delivery location
+--- Initializes paperboy work and creates delivery route with throwing mechanics
 local StartPaperboyJob = function()
-    lib.callback('sd-civilianjobs:server:startPaperboyJob', false, function(paperboyJobStarted, paperboyJobMessage)
+    lib.callback('sd-civilianjobs:server:startPaperboyJob', false, function(paperboyJobStarted, paperboyJobMessage, deliveryData)
         if paperboyJobStarted then
             isPaperboyJobActive = true
             ShowNotification(paperboyJobMessage, 'success')
@@ -265,11 +203,10 @@ local StartPaperboyJob = function()
             lib.callback('sd-civilianjobs:server:getPlayerInfo', false, function(data)
                 cachedPlayerLevel = (data and data.level) or 1
                 
-                local firstPaperboyLocation = GetRandomPaperboyLocation()
-                currentPaperboyJobLocation = firstPaperboyLocation
-                
-                CreatePaperboyJobBlip(firstPaperboyLocation)
-                CreatePaperboyJobTarget(firstPaperboyLocation)
+                -- Create the delivery route with throwing mechanics
+                if deliveryData then
+                    CreatePaperboyRoute(deliveryData)
+                end
             end, 'paperboy')
         else
             ShowNotification(paperboyJobMessage, 'error')
@@ -284,14 +221,8 @@ local EndPaperboyJob = function()
         if paperboyJobEnded then
             isPaperboyJobActive = false
             
-            if currentPaperboyJobBlip then
-                RemoveBlip(currentPaperboyJobBlip)
-                currentPaperboyJobBlip = nil
-            end
-            if currentPaperboyJobTarget then
-                exports.ox_target:removeZone(currentPaperboyJobTarget)
-                currentPaperboyJobTarget = nil
-            end
+            -- Clean up delivery zones and blips
+            ResetPaperboyJob()
             
             local paperboyWorkTimeMinutes = math.floor(paperboyJobSummary.workTime / 60)
             local paperboyTotalPayout = paperboyJobSummary.totalEarned + paperboyJobSummary.bonusPayment
