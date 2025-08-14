@@ -69,6 +69,17 @@ return {
             [3] = {
                 xpRequired = 160,
             }
+        },
+        paperboy = {
+            [1] = {
+                xpRequired = 0,
+            },
+            [2] = {
+                xpRequired = 150,
+            },
+            [3] = {
+                xpRequired = 300,
+            }
         }
     }
 }
