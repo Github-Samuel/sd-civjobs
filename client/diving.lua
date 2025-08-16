@@ -22,6 +22,7 @@ local currentGear = {
     enabled = false
 }
 local oxygenLevel = 0
+local maxOxygenLevel = 0 -- Track maximum oxygen level for percentage calculation
 
 --- Creates diving blip on resource start for permanent visibility
 CreateThread(function()
@@ -136,15 +137,29 @@ local StartOxygenLevelDrawTextThread = function()
     CreateThread(function()
         while currentGear.enabled do
             if IsPedSwimmingUnderWater(cache.ped) then
-                lib.showTextUI(oxygenLevel..'⏱', {
-                    position = "top-center",
+                -- Calculate oxygen percentage
+                local oxygenPercentage = maxOxygenLevel > 0 and math.floor((oxygenLevel / maxOxygenLevel) * 100) or 0
+                
+                -- Get current depth (negative Z coordinate relative to water surface)
+                local playerCoords = GetEntityCoords(cache.ped)
+                local waterLevel = GetWaterHeight(playerCoords.x, playerCoords.y, playerCoords.z)
+                local currentDepth = math.max(0, math.floor(waterLevel - playerCoords.z))
+                
+                -- Create display text with oxygen percentage and depth
+                local displayText = string.format("🫁 Oxygen: %d%%\n🌊 Depth: %dm", 
+                    oxygenPercentage, 
+                    currentDepth
+                )
+                
+                lib.showTextUI(displayText, {
+                    position = "left-center",
                 })
-            end
-            if not IsPedSwimmingUnderWater(cache.ped) then
+            else
                 lib.hideTextUI()
             end
-            Wait(0)
+            Wait(100) -- Update every 100ms for smoother display
         end
+        lib.hideTextUI() -- Ensure UI is hidden when gear is disabled
     end)
 end
 
@@ -256,7 +271,7 @@ local RefillTank = function()
             clip = 'try_shirt_positive_d'
         }
     }) then
-        oxygenLevel = divingConfig.Scuba.startingOxygenLevel
+        oxygenLevel = maxOxygenLevel > 0 and maxOxygenLevel or divingConfig.Scuba.startingOxygenLevel
         ShowNotification("You've successfully refilled your air tank!", "success")
         if currentGear.enabled then
             EnableScuba()
@@ -446,6 +461,7 @@ local StartDivingJob = function()
                 
                 -- Initialize oxygen level
                 oxygenLevel = divingConfig.Scuba.startingOxygenLevel
+                maxOxygenLevel = divingConfig.Scuba.startingOxygenLevel
                 
                 local firstDivingLocation = GetRandomDivingLocation()
                 currentDivingLocation = firstDivingLocation
@@ -569,104 +585,119 @@ end
 
 --- Function to open gear shop menu
 local OpenGearShop = function()
-    -- Build shop options dynamically
-    local shopOptions = {}
-    
-    -- Add diving gear option (simplified for now)
-    table.insert(shopOptions, {
-        title = 'Diving Gear',
-        description = 'Complete diving suit with oxygen tank - $150 each',
-        icon = 'fas fa-mask',
-        onSelect = function()
-            local input = lib.inputDialog('Purchase Diving Gear', {
-                {type = 'number', label = 'Quantity', description = 'How many diving gear sets?', min = 1, max = 10, default = 1}
-            })
+    -- Get player level to show available gear
+    lib.callback('sd-civilianjobs:server:getPlayerInfo', false, function(data)
+        local playerLevel = (data and data.level) or 1
+        local shopOptions = {}
+        
+        -- Add all scuba gear tiers from config
+        for tierIndex, tierData in ipairs(divingConfig.ScubaTiers) do
+            local isAvailable = playerLevel >= tierData.levelRequired
+            local statusText = isAvailable and "Available" or ("Requires Level " .. tierData.levelRequired)
+            local statusColor = isAvailable and "🟢" or "🔴"
             
-            if input and input[1] then
-                local quantity = tonumber(input[1])
-                local totalCost = quantity * 150
-                
-                local alert = lib.alertDialog({
-                    header = 'Confirm Purchase',
-                    content = 'Purchase ' .. quantity .. ' diving gear set(s) for $' .. totalCost .. '?',
-                    centered = true,
-                    cancel = true
+            table.insert(shopOptions, {
+                title = tierData.name,
+                description = statusColor .. " " .. statusText .. " | $" .. tierData.price .. " | " .. tierData.oxygenLevel .. "s oxygen",
+                icon = 'fas fa-mask',
+                disabled = not isAvailable,
+                onSelect = function()
+                    if not isAvailable then
+                        ShowNotification('You need to be level ' .. tierData.levelRequired .. ' to purchase this gear!', 'error')
+                        return
+                    end
+                    
+                    local input = lib.inputDialog('Purchase ' .. tierData.name, {
+                        {type = 'number', label = 'Quantity', description = 'How many gear sets?', min = 1, max = 10, default = 1}
+                    })
+                    
+                    if input and input[1] then
+                        local quantity = tonumber(input[1])
+                        local totalCost = quantity * tierData.price
+                        
+                        local alert = lib.alertDialog({
+                            header = 'Confirm Purchase',
+                            content = 'Purchase ' .. quantity .. 'x ' .. tierData.name .. ' for $' .. totalCost .. '?\n\nOxygen Duration: ' .. tierData.oxygenLevel .. ' seconds',
+                            centered = true,
+                            cancel = true
+                        })
+                        
+                        if alert == 'confirm' then
+                            lib.callback('sd-civilianjobs:server:purchaseGearItem', false, function(success, message)
+                                if success then
+                                    ShowNotification(message, 'success')
+                                else
+                                    ShowNotification(message, 'error')
+                                end
+                                OpenGearShop() -- Reopen shop
+                            end, tierIndex, quantity, totalCost)
+                        else
+                            OpenGearShop() -- Reopen shop if cancelled
+                        end
+                    else
+                        OpenGearShop() -- Reopen shop if input cancelled
+                    end
+                end
+            })
+        end
+        
+        -- Add oxygen refill option
+        table.insert(shopOptions, {
+            title = 'Oxygen Refill',
+            description = 'Refill your oxygen tank - $50 each',
+            icon = 'fas fa-wind',
+            onSelect = function()
+                local input = lib.inputDialog('Purchase Oxygen Refills', {
+                    {type = 'number', label = 'Quantity', description = 'How many oxygen refills?', min = 1, max = 20, default = 1}
                 })
                 
-                if alert == 'confirm' then
-                    lib.callback('sd-civilianjobs:server:purchaseGearItem', false, function(success, message)
-                        if success then
-                            ShowNotification(message, 'success')
-                        else
-                            ShowNotification(message, 'error')
-                        end
-                        OpenGearShop() -- Reopen shop
-                    end, 'diving_gear', quantity, totalCost)
+                if input and input[1] then
+                    local quantity = tonumber(input[1])
+                    local totalCost = quantity * 50
+                    
+                    local alert = lib.alertDialog({
+                        header = 'Confirm Purchase',
+                        content = 'Purchase ' .. quantity .. ' oxygen refill(s) for $' .. totalCost .. '?',
+                        centered = true,
+                        cancel = true
+                    })
+                    
+                    if alert == 'confirm' then
+                        lib.callback('sd-civilianjobs:server:purchaseGearItem', false, function(success, message)
+                            if success then
+                                ShowNotification(message, 'success')
+                            else
+                                ShowNotification(message, 'error')
+                            end
+                            OpenGearShop() -- Reopen shop
+                        end, 'diving_fill', quantity, totalCost)
+                    else
+                        OpenGearShop() -- Reopen shop if cancelled
+                    end
                 else
-                    OpenGearShop() -- Reopen shop if cancelled
+                    OpenGearShop() -- Reopen shop if input cancelled
                 end
-            else
-                OpenGearShop() -- Reopen shop if input cancelled
             end
-        end
-    })
-    
-    -- Add oxygen refill option
-    table.insert(shopOptions, {
-        title = 'Oxygen Refill',
-        description = 'Refill your oxygen tank - $50 each',
-        icon = 'fas fa-wind',
-        onSelect = function()
-            local input = lib.inputDialog('Purchase Oxygen Refills', {
-                {type = 'number', label = 'Quantity', description = 'How many oxygen refills?', min = 1, max = 20, default = 1}
-            })
-            
-            if input and input[1] then
-                local quantity = tonumber(input[1])
-                local totalCost = quantity * 50
-                
-                local alert = lib.alertDialog({
-                    header = 'Confirm Purchase',
-                    content = 'Purchase ' .. quantity .. ' oxygen refill(s) for $' .. totalCost .. '?',
-                    centered = true,
-                    cancel = true
-                })
-                
-                if alert == 'confirm' then
-                    lib.callback('sd-civilianjobs:server:purchaseGearItem', false, function(success, message)
-                        if success then
-                            ShowNotification(message, 'success')
-                        else
-                            ShowNotification(message, 'error')
-                        end
-                        OpenGearShop() -- Reopen shop
-                    end, 'diving_fill', quantity, totalCost)
-                else
-                    OpenGearShop() -- Reopen shop if cancelled
-                end
-            else
-                OpenGearShop() -- Reopen shop if input cancelled
+        })
+        
+        -- Add back button
+        table.insert(shopOptions, {
+            title = 'Back',
+            description = 'Return to main menu',
+            icon = 'fas fa-arrow-left',
+            onSelect = function()
+                OpenDivingMenu()
             end
-        end
-    })
-    
-    -- Add back button
-    table.insert(shopOptions, {
-        title = 'Back',
-        description = 'Return to main menu',
-        icon = 'fas fa-arrow-left',
-        onSelect = function()
-            OpenDivingMenu()
-        end
-    })
-    
-    lib.registerContext({
-        id = 'diving_gear_shop',
-        title = 'Diving Gear Shop',
-        menu = 'diving_main_menu',
-        options = shopOptions
-    })
-    lib.showContext('diving_gear_shop')
+        })
+        
+        lib.registerContext({
+            id = 'diving_gear_shop',
+            title = 'Diving Gear Shop',
+            menu = 'diving_main_menu',
+            options = shopOptions
+        })
+        lib.showContext('diving_gear_shop')
+    end, 'diving')
 end
 
 --- Main diving menu function
@@ -913,3 +944,24 @@ end)
 
 -- Initialize diving ped spawning using shared system
 InitializeJobPedSpawning('diving', divingConfig, OpenDivingMenu, divingPedSpawnDistance)
+
+--- Client event to handle diving gear usage with specific oxygen level
+--- @param customOxygenLevel number Custom oxygen level for this gear tier
+RegisterNetEvent('sd-civilianjobs:client:useDivingGear', function(customOxygenLevel)
+    -- Set oxygen level based on gear tier
+    if customOxygenLevel and customOxygenLevel > 0 then
+        oxygenLevel = customOxygenLevel
+        maxOxygenLevel = customOxygenLevel -- Track max oxygen for percentage calculation
+    else
+        oxygenLevel = divingConfig.Scuba.startingOxygenLevel
+        maxOxygenLevel = divingConfig.Scuba.startingOxygenLevel
+    end
+    
+    -- Put on the diving suit
+    PutOnSuit()
+end)
+
+--- Client event to handle diving oxygen refill usage
+RegisterNetEvent('sd-civilianjobs:client:useDivingFill', function()
+    RefillTank()
+end)

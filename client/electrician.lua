@@ -13,6 +13,8 @@ local currentElectricianJobLocation = nil
 local currentElectricianRepairType = nil
 local recentElectricianLocations = {} -- Track recent locations to avoid repeats
 local cachedPlayerLevel = 1 -- Cache player level to avoid repeated callbacks
+local isNearJobLocation = false -- Track if player is near the job location
+local proximityCheckDistance = 50.0 -- Distance to start checking for objects
 
 --- Creates electrician blip on resource start for permanent visibility
 CreateThread(function()
@@ -185,12 +187,13 @@ local GetRandomElectricianLocation = function()
     return randomElectricianLocation, selectedElectricianRepairType
 end
 
---- Function to create electrician job target for repair interactions
+--- Function to create electrician job target when player is close to location
 --- @param electricianJobCoords vector3 Coordinates for the repair target
 --- @param electricianRepairType string Type of repair ("lightPole" or "electricalBox")
 local CreateElectricianJobTarget = function(electricianJobCoords, electricianRepairType)
     if currentElectricianJobTarget then
         exports.ox_target:removeZone(currentElectricianJobTarget)
+        currentElectricianJobTarget = nil
     end
     
     local electricianTargetOptions = {
@@ -204,12 +207,165 @@ local CreateElectricianJobTarget = function(electricianJobCoords, electricianRep
         }
     }
     
-    currentElectricianJobTarget = exports.ox_target:addSphereZone({
-        coords = electricianJobCoords,
-        radius = 2.0,
-        options = electricianTargetOptions
-    })
+    -- Try to find the closest object to target instead of using a zone
+    local targetEntity = nil
+    local searchRadius = 15.0 -- Search within 15 units of the job location
+    
+    if electricianRepairType == "lightPole" then
+        -- Common light pole object hashes
+        local lightPoleHashes = {
+            GetHashKey('prop_streetlight_01'),
+            GetHashKey('prop_streetlight_02'),
+            GetHashKey('prop_streetlight_03'),
+            GetHashKey('prop_streetlight_04'),
+            GetHashKey('prop_streetlight_05'),
+            GetHashKey('prop_streetlight_06'),
+            GetHashKey('prop_streetlight_07'),
+            GetHashKey('prop_streetlight_08'),
+            GetHashKey('prop_streetlight_09'),
+            GetHashKey('prop_streetlight_10'),
+            GetHashKey('prop_streetlight_11'),
+            GetHashKey('prop_streetlight_12'),
+            GetHashKey('prop_streetlight_double_01'),
+            GetHashKey('prop_streetlight_double_02'),
+            GetHashKey('prop_streetlight_double_03'),
+            GetHashKey('prop_streetlight_triple_01'),
+            GetHashKey('prop_streetlight_triple_02'),
+            GetHashKey('prop_streetlight_triple_03'),
+            GetHashKey('prop_lamppost_01'),
+            GetHashKey('prop_lamppost_02'),
+            GetHashKey('prop_lamppost_03'),
+            GetHashKey('prop_lamppost_04'),
+            GetHashKey('prop_lamppost_05'),
+            GetHashKey('prop_lamppost_06'),
+            GetHashKey('prop_lamppost_07'),
+            GetHashKey('prop_lamppost_08'),
+            GetHashKey('prop_lamppost_09'),
+            GetHashKey('prop_lamppost_10'),
+            GetHashKey('prop_lamppost_11'),
+            GetHashKey('prop_lamppost_12'),
+            GetHashKey('prop_lamppost_13'),
+            GetHashKey('prop_lamppost_14'),
+            GetHashKey('prop_lamppost_15'),
+            GetHashKey('prop_lamppost_16'),
+            GetHashKey('prop_lamppost_17'),
+            GetHashKey('prop_lamppost_18'),
+            GetHashKey('prop_lamppost_19'),
+            GetHashKey('prop_lamppost_20')
+        }
+        
+        -- Find the closest light pole
+        for _, hash in ipairs(lightPoleHashes) do
+            local closestObject = GetClosestObjectOfType(electricianJobCoords.x, electricianJobCoords.y, electricianJobCoords.z, searchRadius, hash, false, false, false)
+            if closestObject and closestObject ~= 0 then
+                targetEntity = closestObject
+                break
+            end
+        end
+    else -- electricalBox
+        -- Common electrical box object hashes
+        local electricalBoxHashes = {
+            GetHashKey('prop_elecbox_01'),
+            GetHashKey('prop_elecbox_02'),
+            GetHashKey('prop_elecbox_03'),
+            GetHashKey('prop_elecbox_04'),
+            GetHashKey('prop_elecbox_05'),
+            GetHashKey('prop_elecbox_06'),
+            GetHashKey('prop_elecbox_07'),
+            GetHashKey('prop_elecbox_08'),
+            GetHashKey('prop_elecbox_09'),
+            GetHashKey('prop_elecbox_10'),
+            GetHashKey('prop_elecbox_11'),
+            GetHashKey('prop_elecbox_12'),
+            GetHashKey('prop_elecbox_13'),
+            GetHashKey('prop_elecbox_14'),
+            GetHashKey('prop_elecbox_15'),
+            GetHashKey('prop_elecbox_16'),
+            GetHashKey('prop_elecbox_17'),
+            GetHashKey('prop_elecbox_18'),
+            GetHashKey('prop_elecbox_19'),
+            GetHashKey('prop_elecbox_20'),
+            GetHashKey('prop_elecbox_21'),
+            GetHashKey('prop_elecbox_22'),
+            GetHashKey('prop_elecbox_23'),
+            GetHashKey('prop_elecbox_24'),
+            GetHashKey('prop_elecbox_25'),
+            GetHashKey('prop_elecbox_26'),
+            GetHashKey('prop_elecbox_27'),
+            GetHashKey('prop_elecbox_28'),
+            GetHashKey('prop_elecbox_29'),
+            GetHashKey('prop_elecbox_30'),
+            GetHashKey('prop_electricbox_01'),
+            GetHashKey('prop_electricbox_02'),
+            GetHashKey('prop_electricbox_03'),
+            GetHashKey('prop_electricbox_04'),
+            GetHashKey('prop_electricbox_05'),
+            GetHashKey('prop_electricbox_06'),
+            GetHashKey('prop_electricbox_07'),
+            GetHashKey('prop_electricbox_08'),
+            GetHashKey('prop_electricbox_09'),
+            GetHashKey('prop_electricbox_10'),
+            GetHashKey('prop_powerbox_01'),
+            GetHashKey('prop_powerbox_02'),
+            GetHashKey('prop_powerbox_03'),
+            GetHashKey('prop_powerbox_04'),
+            GetHashKey('prop_powerbox_05')
+        }
+        
+        -- Find the closest electrical box
+        for _, hash in ipairs(electricalBoxHashes) do
+            local closestObject = GetClosestObjectOfType(electricianJobCoords.x, electricianJobCoords.y, electricianJobCoords.z, searchRadius, hash, false, false, false)
+            if closestObject and closestObject ~= 0 then
+                targetEntity = closestObject
+                break
+            end
+        end
+    end
+    
+    -- If we found a suitable entity, add entity targeting to it
+    if targetEntity then
+        currentElectricianJobTarget = exports.ox_target:addLocalEntity(targetEntity, electricianTargetOptions)
+        print("^2[Civilian Jobs] Added entity target to " .. electricianRepairType .. " object^0")
+    else
+        -- Fallback to zone-based targeting if no suitable object found
+        currentElectricianJobTarget = exports.ox_target:addSphereZone({
+            coords = electricianJobCoords,
+            radius = 2.0,
+            options = electricianTargetOptions
+        })
+        print("^3[Civilian Jobs] No suitable " .. electricianRepairType .. " object found, using zone target^0")
+    end
 end
+
+--- Proximity monitoring thread for electrician job locations
+CreateThread(function()
+    while true do
+        Wait(1000) -- Check every second
+        
+        if isElectricianJobActive and currentElectricianJobLocation then
+            local playerPed = PlayerPedId()
+            local playerCoords = GetEntityCoords(playerPed)
+            local distanceToJob = #(playerCoords - currentElectricianJobLocation)
+            
+            if not isNearJobLocation and distanceToJob <= proximityCheckDistance then
+                isNearJobLocation = true
+                Wait(2000)
+                if isElectricianJobActive and currentElectricianJobLocation then
+                    CreateElectricianJobTarget(currentElectricianJobLocation, currentElectricianRepairType)
+                end
+            elseif isNearJobLocation and distanceToJob > proximityCheckDistance then
+                isNearJobLocation = false
+                if currentElectricianJobTarget then
+                    exports.ox_target:removeZone(currentElectricianJobTarget)
+                    currentElectricianJobTarget = nil
+                    print("^3[Civilian Jobs] Removed electrician target - player moved away^0")
+                end
+            end
+        else
+            isNearJobLocation = false
+        end
+    end
+end)
 
 --- Function to handle electrician repair work on electrical items
 --- @param repairType string Type of repair work ("lightPole" or "electricalBox")
@@ -227,8 +383,7 @@ RepairElectricalItem = function(repairType)
         end
     end
     
-    -- Use cached player level to determine progress bar time (no callback needed)
-    local repairTime = electricianConfig.Time[cachedPlayerLevel] or electricianConfig.Time[1] -- Fallback to level 1 time
+    local repairTime = electricianConfig.Time[cachedPlayerLevel] or electricianConfig.Time[1]
     
     TaskStartScenarioInPlace(playerPed, "WORLD_HUMAN_WELDING", 0, true)
     
@@ -249,7 +404,6 @@ RepairElectricalItem = function(repairType)
                 DeleteObject(blowtorchProp)
             end
             
-            -- Now clear the tasks
             ClearPedTasks(playerPed)
             
             lib.callback('sd-civilianjobs:server:completeElectricianTask', false, function(electricianTaskCompleted, electricianCashReward)
@@ -271,21 +425,20 @@ RepairElectricalItem = function(repairType)
                     currentElectricianJobLocation = nextElectricianLocation
                     currentElectricianRepairType = nextElectricianRepairType
                     
+                    isNearJobLocation = false
+                    
                     CreateElectricianJobBlip(nextElectricianLocation, nextElectricianRepairType)
-                    CreateElectricianJobTarget(nextElectricianLocation, nextElectricianRepairType)
                 else
                     ShowNotification('Failed to complete electrician repair', 'error')
                 end
             end, repairType)
         else
-            -- Find and delete the blowtorch prop before clearing tasks
             local playerCoords = GetEntityCoords(playerPed)
             local blowtorchProp = GetClosestObjectOfType(playerCoords.x, playerCoords.y, playerCoords.z, 3.0, GetHashKey('prop_weld_torch'), false, false, false)
             if blowtorchProp and blowtorchProp ~= 0 then
                 DeleteObject(blowtorchProp)
             end
             
-            -- Now clear the tasks
             ClearPedTasks(playerPed)
             ShowNotification('Electrician repair cancelled', 'error')
         end
@@ -299,7 +452,6 @@ local StartElectricianJob = function()
             isElectricianJobActive = true
             ShowNotification(electricianJobMessage, 'success')
             
-            -- Cache player level when job starts to avoid repeated callbacks
             lib.callback('sd-civilianjobs:server:getPlayerInfo', false, function(data)
                 cachedPlayerLevel = (data and data.level) or 1
                 
@@ -308,7 +460,6 @@ local StartElectricianJob = function()
                 currentElectricianRepairType = firstElectricianRepairType
                 
                 CreateElectricianJobBlip(firstElectricianLocation, firstElectricianRepairType)
-                CreateElectricianJobTarget(firstElectricianLocation, firstElectricianRepairType)
             end, 'electrician')
         else
             ShowNotification(electricianJobMessage, 'error')

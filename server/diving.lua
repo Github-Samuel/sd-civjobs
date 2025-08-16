@@ -206,31 +206,112 @@ end)
 
 -- [[ Diving Gear Exports ]]
 
---- Export to use diving gear item
---- @param source number Player source ID
+--- Export to use diving gear item with ox_inventory event system
+--- @param event string Event type ('usingItem', 'usedItem', 'buying')
+--- @param item table Item data containing metadata
+--- @param inventory table Inventory data containing player info
+--- @param slot number Slot number of the item
+--- @param data table Additional data
 --- @return boolean success Whether the diving gear was used successfully
-exports('useDivingGear', function(source)
-    if not source then return false end
+exports('useDivingGear', function(event, item, inventory, slot, data)
+    -- Player is attempting to use the item
+    if event == 'usingItem' then
+        local source = inventory.id
+        if not source then return false end
+        
+        -- Determine gear tier from item name
+        local gearTier = 1 -- Default to tier 1
+        if item and item.name then
+            local tierMatch = string.match(item.name, "diving_gear_(%d+)")
+            if tierMatch then
+                gearTier = tonumber(tierMatch) or 1
+            end
+        end
+        
+        -- Get oxygen level from config based on tier
+        local tierData = divingConfig.ScubaTiers[gearTier]
+        local oxygenLevel = tierData and tierData.oxygenLevel or divingConfig.Scuba.startingOxygenLevel
+        
+        -- Trigger client event to put on diving suit with specific oxygen level
+        TriggerClientEvent('sd-civilianjobs:client:useDivingGear', source, oxygenLevel)
+        
+        -- Return true to allow the item to be consumed/used
+        return true
+    end
     
-    -- Trigger client event to put on diving suit
-    TriggerClientEvent('sd-civilianjobs:client:useDivingGear', source)
-    return true
+    -- Player has finished using the item
+    if event == 'usedItem' then
+        local source = inventory.id
+        local tierName = "Basic Scuba Gear"
+        
+        -- Get tier name for notification
+        if item and item.name then
+            local tierMatch = string.match(item.name, "diving_gear_(%d+)")
+            if tierMatch then
+                local gearTier = tonumber(tierMatch) or 1
+                local tierData = divingConfig.ScubaTiers[gearTier]
+                tierName = tierData and tierData.name or "Basic Scuba Gear"
+            end
+        end
+        
+        return TriggerClientEvent('ox_lib:notify', source, {
+            type = 'success',
+            description = 'You equipped your ' .. tierName .. ' and are ready to dive!'
+        })
+    end
+    
+    -- Player is attempting to purchase the item
+    if event == 'buying' then
+        local source = inventory.id
+        return TriggerClientEvent('ox_lib:notify', source, {
+            type = 'success',
+            description = 'You purchased diving gear'
+        })
+    end
 end)
 
---- Export to use diving oxygen refill item
---- @param source number Player source ID
+--- Export to use diving oxygen refill item with ox_inventory event system
+--- @param event string Event type ('usingItem', 'usedItem', 'buying')
+--- @param item table Item data containing metadata
+--- @param inventory table Inventory data containing player info
+--- @param slot number Slot number of the item
+--- @param data table Additional data
 --- @return boolean success Whether the oxygen refill was used successfully
-exports('useDivingFill', function(source)
-    if not source then return false end
+exports('useDivingFill', function(event, item, inventory, slot, data)
+    -- Player is attempting to use the item
+    if event == 'usingItem' then
+        local source = inventory.id
+        if not source then return false end
+        
+        -- Trigger client event to refill oxygen tank
+        TriggerClientEvent('sd-civilianjobs:client:useDivingFill', source)
+        
+        -- Return true to allow the item to be consumed/used
+        return true
+    end
     
-    -- Trigger client event to refill oxygen tank
-    TriggerClientEvent('sd-civilianjobs:client:useDivingFill', source)
-    return true
+    -- Player has finished using the item
+    if event == 'usedItem' then
+        local source = inventory.id
+        return TriggerClientEvent('ox_lib:notify', source, {
+            type = 'success',
+            description = 'Your oxygen tank has been refilled and is ready for diving!'
+        })
+    end
+    
+    -- Player is attempting to purchase the item
+    if event == 'buying' then
+        local source = inventory.id
+        return TriggerClientEvent('ox_lib:notify', source, {
+            type = 'success',
+            description = 'You purchased an oxygen refill'
+        })
+    end
 end)
 
 --- Callback to purchase gear items from the diving shop
 --- @param source number Player source ID
---- @param itemName string Name of the item to purchase (now can be tier index or 'diving_fill')
+--- @param itemType string|number Type of item to purchase (tier index for gear or 'diving_fill')
 --- @param quantity number Quantity to purchase
 --- @param totalCost number Total cost of the purchase
 --- @return boolean success Whether the purchase was successful
@@ -249,6 +330,7 @@ lib.callback.register('sd-civilianjobs:server:purchaseGearItem', function(source
     
     local itemToGive = nil
     local expectedPrice = 0
+    local purchaseMessage = ""
     
     if itemType == 'diving_fill' then
         local refillPrice = 50
@@ -258,15 +340,15 @@ lib.callback.register('sd-civilianjobs:server:purchaseGearItem', function(source
         itemToGive = 'diving_fill'
         expectedPrice = quantity * refillPrice
     else
-        -- Assume itemType is a tier index
+        -- Handle scuba gear tiers
         local tierIndex = tonumber(itemType)
-        if not tierIndex then
-            return false, "Invalid item type for scuba gear"
+        if not tierIndex or tierIndex < 1 or tierIndex > 5 then
+            return false, "Invalid scuba gear tier"
         end
         
         local tierData = divingConfig.ScubaTiers[tierIndex]
         if not tierData then
-            return false, "Invalid scuba gear tier"
+            return false, "Invalid scuba gear tier configuration"
         end
         
         -- Validate player level
@@ -278,18 +360,10 @@ lib.callback.register('sd-civilianjobs:server:purchaseGearItem', function(source
         if totalCost ~= (quantity * tierData.price) then
             return false, "Price mismatch detected for scuba gear tier"
         end
-        itemToGive = 'diving_gear' -- The actual item name in ox_inventory
+        
+        -- Use specific item name for each tier
+        itemToGive = 'diving_gear_' .. tierIndex
         expectedPrice = quantity * tierData.price
-        
-        -- Store the oxygen level in the item metadata if ox_inventory supports it
-        -- This assumes your ox_inventory item 'diving_gear' can accept metadata
-        -- If not, you might need to create different item names for each tier (e.g., 'diving_gear_tier1', 'diving_gear_tier2')
-        -- For simplicity, let's assume a generic 'diving_gear' and we pass the oxygen level via metadata if needed.
-        -- The client will need to read this metadata when using the item.
-        
-        -- Example of passing metadata (adjust as per your ox_inventory setup)
-        -- Player.Functions.AddItem(itemToGive, quantity, false, { oxygenLevel = tierData.oxygenLevel })
-        -- return true, "Purchased " .. quantity .. "x " .. tierData.name .. " for $" .. totalCost
     end
     
     -- Check if player is near the diving ped
@@ -316,15 +390,13 @@ lib.callback.register('sd-civilianjobs:server:purchaseGearItem', function(source
     
     -- Remove money and add items
     Player.Functions.RemoveMoney('cash', expectedPrice)
+    Player.Functions.AddItem(itemToGive, quantity)
     
-    local purchaseMessage = ""
+    -- Create purchase message
     if itemType == 'diving_fill' then
-        Player.Functions.AddItem(itemToGive, quantity)
         purchaseMessage = "Purchased " .. quantity .. "x " .. itemData.label .. " for $" .. expectedPrice
     else
         local tierData = divingConfig.ScubaTiers[tonumber(itemType)]
-        -- Add item with metadata for oxygen level
-        Player.Functions.AddItem(itemToGive, quantity, false, { oxygenLevel = tierData.oxygenLevel })
         purchaseMessage = "Purchased " .. quantity .. "x " .. tierData.name .. " for $" .. expectedPrice
     end
     
