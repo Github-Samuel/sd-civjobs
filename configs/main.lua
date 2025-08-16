@@ -2,6 +2,28 @@ return {
     Stats = {
         Enable = true,
     },
+    -- Sprite interaction system configuration
+    Sprites = {
+        -- Sprite visual settings
+        colors = {
+            background = {r = 255, g = 255, b = 255, a = 200}, -- White background with transparency
+            text = {r = 0, g = 0, b = 0, a = 255} -- Black text
+        },
+        -- Sprite behavior settings
+        defaultRange = 10.0, -- Default interaction range in units
+        closeRange = 1.5, -- Range for detailed sprite display
+        screenBounds = { -- Screen area bounds for sprite visibility
+            minX = 0.2,
+            minY = 0.2,
+            maxX = 0.8,
+            maxY = 0.8
+        },
+        -- Sprite sizing
+        circleSize = 0.0155, -- Size of circle sprite
+        hexScaleMultiplier = 0.05, -- Base scale for hex sprite
+        textScaleMultiplier = 6, -- Text scale multiplier
+        textOffset = 0.25 -- Text vertical offset
+    },
     Levels = {
         electrician = {
             [1] = {
@@ -79,6 +101,17 @@ return {
             },
             [3] = {
                 xpRequired = 300,
+            }
+        },
+        diving = {
+            [1] = {
+                xpRequired = 0,
+            },
+            [2] = {
+                xpRequired = 200,
+            },
+            [3] = {
+                xpRequired = 400,
             }
         }
     }

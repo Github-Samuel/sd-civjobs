@@ -224,3 +224,16 @@ lib.callback.register('sd-civilianjobs:server:getElectricianStats', function(sou
     
     return {} -- Return empty table if player not found
 end)
+
+-- [[ Welding Torch Export ]]
+
+--- Export to use welding torch item
+--- @param source number Player source ID
+--- @return boolean success Whether the welding torch was used successfully
+exports('useWeldingTorch', function(source)
+    if not source then return false end
+    
+    -- Trigger client event to activate welding torch
+    TriggerClientEvent('sd-civilianjobs:client:useWeldingTorch', source)
+    return true
+end)

@@ -225,7 +225,7 @@ local EndPaperboyJob = function()
             ResetPaperboyJob()
             
             local paperboyWorkTimeMinutes = math.floor(paperboyJobSummary.workTime / 60)
-            local paperboyTotalPayout = paperboyJobSummary.totalEarned + paperboyJobSummary.bonusPayment
+            local paperboyTotalPayout = paperboyJobSummary.totalEarned
             
             lib.registerContext({
                 id = 'paperboy_job_summary',
@@ -247,18 +247,6 @@ local EndPaperboyJob = function()
                         title = 'Work Time',
                         description = paperboyWorkTimeMinutes .. ' minutes worked',
                         icon = 'fas fa-clock',
-                        readOnly = true
-                    },
-                    {
-                        title = 'Base Earnings',
-                        description = '$' .. paperboyJobSummary.totalEarned .. ' from deliveries',
-                        icon = 'fas fa-dollar-sign',
-                        readOnly = true
-                    },
-                    {
-                        title = 'Bonus Payment',
-                        description = paperboyJobSummary.bonusPayment > 0 and ('$' .. paperboyJobSummary.bonusPayment .. ' (10% bonus for 10+ deliveries)') or 'No bonus earned',
-                        icon = 'fas fa-gift',
                         readOnly = true
                     },
                     {

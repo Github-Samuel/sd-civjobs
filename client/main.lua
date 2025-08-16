@@ -100,6 +100,45 @@ InitializeJobPedSpawning = function(jobType, config, menuFunction, spawnDistance
     end)
 end
 
+--- Function to get vehicle license plate text
+--- @param vehicle number Vehicle entity handle
+--- @return string plate Vehicle license plate text (trimmed)
+GetVehiclePlate = function(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then return "" end
+    return string.gsub(GetVehicleNumberPlateText(vehicle), "^%s*(.-)%s*$", "%1") -- Trim whitespace
+end
+
+--- Function to get vehicle fuel level
+--- @param vehicle number Vehicle entity handle
+--- @return number fuelLevel Current fuel level (0-100)
+GetVehicleFuel = function(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then return 0 end
+    
+    -- Try to get fuel from statebag first (ox_fuel)
+    local fuelLevel = Entity(vehicle).state.fuel
+    if fuelLevel then
+        return fuelLevel
+    end
+    
+    -- Fallback to native function
+    return GetVehicleFuelLevel(vehicle)
+end
+
+--- Function to set vehicle fuel level (client-side)
+--- @param vehicle number Vehicle entity handle
+--- @param fuelAmount number Fuel amount to set (0-100)
+SetVehicleFuel = function(vehicle, fuelAmount)
+    if not vehicle or not DoesEntityExist(vehicle) then return end
+    
+    print('setting fuel to', fuelAmount)
+    -- Set using native function (client-side)
+    SetVehicleFuelLevel(vehicle, fuelAmount)
+    
+    -- Trigger server event to set statebag for ox_fuel compatibility
+    local plate = GetVehiclePlate(vehicle)
+    TriggerServerEvent('sd-civilianjobs:server:setVehicleFuel', NetworkGetNetworkIdFromEntity(vehicle), fuelAmount, plate)
+end
+
 --- Function to cleanup all job peds on resource stop
 CleanupAllJobPeds = function()
     for jobType, ped in pairs(jobPeds) do
@@ -116,3 +155,22 @@ CleanupAllJobPeds = function()
     end
     jobBlips = {}
 end
+
+-- [[ Commands ]]
+
+--- Command to check current vehicle fuel level
+RegisterCommand('fuel', function(source, args, rawCommand)
+    local playerPed = PlayerPedId()
+    local vehicle = GetVehiclePedIsIn(playerPed, false)
+    
+    if vehicle == 0 then
+        ShowNotification('You are not in a vehicle!', 'error')
+        return
+    end
+    
+    local fuelLevel = GetVehicleFuel(vehicle)
+    local vehicleName = GetDisplayNameFromVehicleModel(GetEntityModel(vehicle))
+    local plate = GetVehiclePlate(vehicle)
+    
+    ShowNotification(string.format('%s (%s) - Fuel: %.1f%%', vehicleName, plate, fuelLevel), 'info', 7000)
+end, false)

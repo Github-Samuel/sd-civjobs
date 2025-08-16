@@ -241,3 +241,22 @@ UpdateStats = function(identifier, jobType, statName, amount)
     end
     return false
 end
+
+--- Server event to set vehicle fuel level using statebags (ox_fuel compatible)
+--- @param netId number Network ID of the vehicle
+--- @param fuelAmount number Fuel amount to set (0-100)
+--- @param plate string Vehicle license plate for logging
+RegisterNetEvent('sd-civilianjobs:server:setVehicleFuel', function(netId, fuelAmount, plate)
+    local source = source
+    local vehicle = NetworkGetEntityFromNetworkId(netId)
+    
+    if not vehicle or vehicle == 0 then
+        print("^3[Civilian Jobs] Failed to get vehicle from network ID: " .. tostring(netId) .. "^0")
+        return
+    end
+    
+    -- Set fuel using statebag (ox_fuel compatible)
+    Entity(vehicle).state.fuel = fuelAmount
+    
+    print("^2[Civilian Jobs] Vehicle fuel set to " .. fuelAmount .. "% for plate: " .. (plate or "Unknown") .. "^0")
+end)

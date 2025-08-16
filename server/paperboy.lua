@@ -115,16 +115,10 @@ lib.callback.register('sd-civilianjobs:server:endPaperboyJob', function(source)
     
     local paperboyJobData = activePaperboyJobs[identifier]
     local workTime = os.time() - paperboyJobData.startTime
-    local bonusPayment = 0
     
-    -- Calculate bonus based on deliveries completed
-    if paperboyJobData.newspapersDelivered >= 10 then
-        bonusPayment = math.floor(paperboyJobData.totalEarned * 0.1) -- 10% bonus for 10+ deliveries
-    end
+    local totalPayout = paperboyJobData.totalEarned
     
-    local totalPayout = paperboyJobData.totalEarned + bonusPayment
-    
-    -- Give final paycheck (base earnings + bonus)
+    -- Give final paycheck
     local Player = GetPlayer(source)
     if Player then
         Player.Functions.AddMoney('cash', totalPayout)
@@ -140,7 +134,6 @@ lib.callback.register('sd-civilianjobs:server:endPaperboyJob', function(source)
     local paperboyJobSummary = {
         newspapersDelivered = paperboyJobData.newspapersDelivered,
         totalEarned = paperboyJobData.totalEarned,
-        bonusPayment = bonusPayment,
         workTime = workTime
     }
     
