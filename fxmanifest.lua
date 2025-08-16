@@ -10,6 +10,6 @@ shared_scripts { '@ox_lib/init.lua' }
 
 server_scripts { '@oxmysql/lib/MySQL.lua', 'server/main.lua', 'server/*.lua'} 
 
-files { 'configs/*.lua', 'assets/*.png' }
+files { 'configs/*.lua' }
 
 lua54 'yes'

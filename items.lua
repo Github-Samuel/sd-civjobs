@@ -35,18 +35,3 @@
         export = 'sd-civjobs.useDivingFill'
     }
 },
-
-["welding_torch"] = {
-    label = "Welding Torch",
-    weight = 2000,
-    stack = false,
-    close = true,
-    consume = 0,
-    description = "Professional welding torch for electrical repairs. Use near electrical equipment.",
-    client = {
-        image = "welding_torch.png",
-    },
-    server = {
-        export = 'sd-civjobs.useWeldingTorch'
-    }
-},

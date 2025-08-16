@@ -8,237 +8,11 @@ local electricianPedSpawnDistance = 100.0
 -- Electrician job variables
 local isElectricianJobActive = false
 local currentElectricianJobBlip = nil
-local currentElectricianJobSprite = nil
+local currentElectricianJobTarget = nil
 local currentElectricianJobLocation = nil
 local currentElectricianRepairType = nil
 local recentElectricianLocations = {} -- Track recent locations to avoid repeats
 local cachedPlayerLevel = 1 -- Cache player level to avoid repeated callbacks
-
--- Welding torch variables
-local weldingTorchActive = false
-local weldingTorchProp = nil
-local weldingTorchDict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@'
-local weldingTorchAnim = 'machinic_loop_mechandplayer'
-
--- [[ Welding Torch System ]]
-
---- Event handler for using welding torch item
-RegisterNetEvent('sd-civilianjobs:client:useWeldingTorch', function()
-    if weldingTorchActive then
-        ShowNotification('You already have a welding torch active!', 'error')
-        return
-    end
-    
-    if not isElectricianJobActive then
-        ShowNotification('You need an active electrician job to use the welding torch!', 'error')
-        return
-    end
-    
-    if not currentElectricianJobLocation then
-        ShowNotification('No repair location available!', 'error')
-        return
-    end
-    
-    local playerPed = PlayerPedId()
-    local playerCoords = GetEntityCoords(playerPed)
-    local distance = #(playerCoords - currentElectricianJobLocation)
-    
-    if distance > 5.0 then
-        ShowNotification('You need to be closer to the repair location to use the welding torch!', 'error')
-        return
-    end
-    
-    ActivateWeldingTorch()
-end)
-
---- Function to activate welding torch with placement system
-local ActivateWeldingTorch = function()
-    local playerPed = PlayerPedId()
-    local playerCoords = GetEntityCoords(playerPed)
-    
-    -- Request animation dictionary
-    lib.requestAnimDict(weldingTorchDict)
-    
-    -- Create welding torch prop
-    local torchModel = GetHashKey('prop_weld_torch')
-    lib.requestModel(torchModel)
-    
-    weldingTorchProp = CreateObject(torchModel, playerCoords.x, playerCoords.y, playerCoords.z, true, true, false)
-    SetEntityAlpha(weldingTorchProp, 100, false)
-    
-    -- Attach torch to player's hand
-    local boneIndex = GetPedBoneIndex(playerPed, 57005) -- Right hand bone
-    AttachEntityToEntity(weldingTorchProp, playerPed, boneIndex, 0.15, 0.0, -0.05, 0.0, 0.0, 0.0, true, true, false, false, 1, true)
-    
-    -- Set outline for visibility
-    SetEntityDrawOutlineShader(1)
-    SetEntityDrawOutlineColor(255, 20, 147, 180) -- Pink outline
-    SetEntityDrawOutline(weldingTorchProp, true)
-    
-    weldingTorchActive = true
-    
-    ShowNotification('Welding torch activated! Move close to the repair location and press [E] to start welding.', 'info')
-    
-    -- Start welding torch interaction thread
-    CreateThread(function()
-        local shownTextUI = false
-        
-        while weldingTorchActive do
-            local currentCoords = GetEntityCoords(playerPed)
-            local distanceToRepair = #(currentCoords - currentElectricianJobLocation)
-            
-            if distanceToRepair <= 2.0 then
-                if not shownTextUI then
-                    shownTextUI = true
-                    lib.showTextUI('[E] - Start Welding Repair')
-                end
-                
-                if IsControlJustReleased(0, 38) then -- E key
-                    lib.hideTextUI()
-                    shownTextUI = false
-                    StartWeldingRepair()
-                    break
-                end
-            else
-                if shownTextUI then
-                    lib.hideTextUI()
-                    shownTextUI = false
-                end
-            end
-            
-            -- Check if player is too far from repair location
-            if distanceToRepair > 25.0 then
-                ShowNotification('You moved too far from the repair location!', 'error')
-                DeactivateWeldingTorch()
-                break
-            end
-            
-            Wait(0)
-        end
-        
-        if shownTextUI then
-            lib.hideTextUI()
-        end
-    end)
-end
-
---- Function to start the welding repair process
-local StartWeldingRepair = function()
-    local playerPed = PlayerPedId()
-    
-    -- Freeze player and start welding animation
-    FreezeEntityPosition(playerPed, true)
-    TaskPlayAnim(playerPed, weldingTorchDict, weldingTorchAnim, 3.0, 3.0, -1, 1 | 16, 0, false, false, false)
-    
-    -- Run minigame if enabled
-    local minigameSuccess = true
-    if electricianConfig.Minigame and electricianConfig.Minigame.Enable then
-        minigameSuccess = electricianConfig.Minigame.Start()
-        if not minigameSuccess then
-            ShowNotification('Welding failed! Try again.', 'error')
-            DeactivateWeldingTorch()
-            return
-        end
-    end
-    
-    -- Use cached player level to determine repair time
-    local repairTime = electricianConfig.Time and electricianConfig.Time[cachedPlayerLevel] or 10000 -- Default 10 seconds
-    
-    if lib.progressBar({
-        duration = repairTime,
-        label = currentElectricianRepairType == "lightPole" and 'Welding light pole...' or 'Welding electrical box...',
-        useWhileDead = false,
-        canCancel = true,
-        disable = {
-            car = true,
-            move = true,
-            combat = true
-        }
-    }) then
-        -- Repair completed successfully
-        ClearPedTasks(playerPed)
-        FreezeEntityPosition(playerPed, false)
-        
-        lib.callback('sd-civilianjobs:server:completeElectricianTask', false, function(taskCompleted, cashReward)
-            if taskCompleted then
-                local repairTypeText = currentElectricianRepairType == "lightPole" and "light pole" or "electrical box"
-                ShowNotification('Repair completed! $' .. cashReward .. ' added to your paycheck for fixing the ' .. repairTypeText .. '.', 'success')
-                
-                -- Clean up current job elements
-                if currentElectricianJobBlip then
-                    RemoveBlip(currentElectricianJobBlip)
-                    currentElectricianJobBlip = nil
-                end
-                currentElectricianJobSprite = nil
-                
-                -- Get next repair location
-                Wait(2000)
-                local nextLocation, nextRepairType = GetRandomElectricianLocation()
-                currentElectricianJobLocation = nextLocation
-                currentElectricianRepairType = nextRepairType
-                
-                CreateElectricianJobBlip(nextLocation, nextRepairType)
-                CreateElectricianJobSprite(nextLocation, nextRepairType)
-                
-                ShowNotification('Next repair location marked on your map.', 'info')
-            else
-                ShowNotification('Failed to complete repair', 'error')
-            end
-        end, currentElectricianRepairType)
-        
-        DeactivateWeldingTorch()
-    else
-        -- Repair cancelled
-        ClearPedTasks(playerPed)
-        FreezeEntityPosition(playerPed, false)
-        ShowNotification('Welding repair cancelled', 'error')
-        DeactivateWeldingTorch()
-    end
-end
-
---- Function to deactivate welding torch
-local DeactivateWeldingTorch = function()
-    if weldingTorchProp and DoesEntityExist(weldingTorchProp) then
-        SetEntityDrawOutline(weldingTorchProp, false)
-        DeleteEntity(weldingTorchProp)
-        weldingTorchProp = nil
-    end
-    
-    weldingTorchActive = false
-    
-    local playerPed = PlayerPedId()
-    ClearPedTasks(playerPed)
-    FreezeEntityPosition(playerPed, false)
-    
-    RemoveAnimDict(weldingTorchDict)
-end
-
--- [[ Sprite Drawing Thread ]]
-
---- Thread to continuously draw electrician job sprites with pink colors
-CreateThread(function()
-    while true do
-        if isElectricianJobActive and currentElectricianJobSprite then
-            local playerCoords = GetEntityCoords(PlayerPedId())
-            
-            -- Temporarily override sprite colors for pink theme
-            local originalBgColor = mainConfig.Sprites.colors.background
-            local originalTextColor = mainConfig.Sprites.colors.text
-            
-            -- Set pink colors
-            mainConfig.Sprites.colors.background = {r = 255, g = 20, b = 147, a = 200} -- Deep pink
-            mainConfig.Sprites.colors.text = {r = 255, g = 255, b = 255, a = 255} -- White text
-            
-            -- Draw the sprite
-            currentElectricianJobSprite:draw(playerCoords)
-            
-            -- Restore original colors
-            mainConfig.Sprites.colors.background = originalBgColor
-            mainConfig.Sprites.colors.text = originalTextColor
-        end
-        Wait(0)
-    end
-end)
 
 --- Creates electrician blip on resource start for permanent visibility
 CreateThread(function()
@@ -411,20 +185,29 @@ local GetRandomElectricianLocation = function()
     return randomElectricianLocation, selectedElectricianRepairType
 end
 
---- Function to create electrician job sprite for repair interactions
---- @param electricianJobCoords vector3 Coordinates for the repair sprite
+--- Function to create electrician job target for repair interactions
+--- @param electricianJobCoords vector3 Coordinates for the repair target
 --- @param electricianRepairType string Type of repair ("lightPole" or "electricalBox")
-local CreateElectricianJobSprite = function(electricianJobCoords, electricianRepairType)
-    if currentElectricianJobSprite then
-        currentElectricianJobSprite = nil
+local CreateElectricianJobTarget = function(electricianJobCoords, electricianRepairType)
+    if currentElectricianJobTarget then
+        exports.ox_target:removeZone(currentElectricianJobTarget)
     end
     
-    local spriteText = electricianRepairType == "lightPole" and "Repair Light Pole" or "Repair Electrical Box"
+    local electricianTargetOptions = {
+        {
+            name = 'repair_electrician_' .. electricianRepairType,
+            icon = electricianRepairType == "lightPole" and 'fas fa-lightbulb' or 'fas fa-plug',
+            label = electricianRepairType == "lightPole" and 'Repair Light Pole' or 'Repair Electrical Box',
+            onSelect = function()
+                RepairElectricalItem(electricianRepairType)
+            end
+        }
+    }
     
-    currentElectricianJobSprite = CreateSprite({
+    currentElectricianJobTarget = exports.ox_target:addSphereZone({
         coords = electricianJobCoords,
-        text = spriteText, -- Add the missing text property
-        range = 15.0
+        radius = 2.0,
+        options = electricianTargetOptions
     })
 end
 
@@ -525,7 +308,7 @@ local StartElectricianJob = function()
                 currentElectricianRepairType = firstElectricianRepairType
                 
                 CreateElectricianJobBlip(firstElectricianLocation, firstElectricianRepairType)
-                CreateElectricianJobSprite(firstElectricianLocation, firstElectricianRepairType)
+                CreateElectricianJobTarget(firstElectricianLocation, firstElectricianRepairType)
             end, 'electrician')
         else
             ShowNotification(electricianJobMessage, 'error')
@@ -544,12 +327,9 @@ local EndElectricianJob = function()
                 RemoveBlip(currentElectricianJobBlip)
                 currentElectricianJobBlip = nil
             end
-            -- Clean up sprite
-            currentElectricianJobSprite = nil
-            
-            -- Deactivate welding torch if active
-            if weldingTorchActive then
-                DeactivateWeldingTorch()
+            if currentElectricianJobTarget then
+                exports.ox_target:removeZone(currentElectricianJobTarget)
+                currentElectricianJobTarget = nil
             end
             
             local electricianWorkTimeMinutes = math.floor(electricianJobSummary.workTime / 60)
